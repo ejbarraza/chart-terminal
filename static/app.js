@@ -9,9 +9,16 @@ const LS_DRAW = 'ct-drawings-v1';
 
 /* ---------------- transport ----------------
  * Browser mode: plain HTTP to the Flask backend.
- * Tauri mode: window.__TAURI__.core.invoke -> Rust commands.
+ * Tauri mode: invoke() -> Rust commands. Tauri v2 does NOT provide
+ * window.__TAURI__ (that was v1); it injects window.__TAURI_INTERNALS__
+ * with an invoke() function instead. We support both.
  * Both speak the same JSON shapes, so the rest of the app is identical. */
-const TAURI_CORE = (window.__TAURI__ && window.__TAURI__.core) || null;
+const TAURI_INVOKE =
+  (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) ||
+  (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke &&
+    window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__)) ||
+  null;
+const TAURI_CORE = TAURI_INVOKE ? { invoke: TAURI_INVOKE } : null;
 async function tauriInvoke(path, body) {
   const u = new URL(path, 'http://localhost');
   const q = Object.fromEntries(u.searchParams.entries());
