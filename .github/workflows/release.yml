@@ -49,11 +49,11 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - uses: tauri-apps/tauri-action@v2
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: chart-terminal/src-tauri
+          projectPath: src-tauri
           tagName: ${{ github.ref_name }}
           releaseName: "Chart Terminal ${{ github.ref_name }}"
           releaseDraft: true
