@@ -1,0 +1,27 @@
+# chart-terminal — keep secrets and build junk out of git before publishing
+
+# --- Secrets: never commit ---
+.env
+.env.*
+*.key
+twelvedata.key
+
+# --- Rust / Tauri ---
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/gen/
+
+# --- Node (if a bundled frontend is added later) ---
+node_modules/
+dist/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+
+# --- OS ---
+.DS_Store
+Thumbs.db

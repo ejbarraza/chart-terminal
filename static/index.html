@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chart-terminal — free charting</title>
+<link rel="stylesheet" href="styles.css">
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">chart-terminal</div>
+  <div class="symbox">
+    <input id="symbol-input" placeholder="Symbol (e.g. AAPL)" spellcheck="false" autocomplete="off">
+    <button id="symbol-go" title="Load symbol">Go</button>
+  </div>
+  <div id="quote" class="quote"></div>
+  <div class="srcbox" title="Market data source">
+    <select id="source-sel"></select>
+  </div>
+  <button id="settings-btn" title="Settings">⚙</button>
+  <div id="settings-pop" class="popover hidden">
+    <div class="pop-title">Settings</div>
+    <label class="pop-row">Twelve Data API key
+      <input type="password" id="tdkey-input" placeholder="paste key…" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="pop-row btns">
+      <button id="tdkey-save">Save</button>
+      <button id="tdkey-clear">Clear</button>
+    </div>
+    <div id="tdkey-status" class="pop-status"></div>
+    <div class="pop-hint">Stored locally on this machine only, never sent anywhere except Twelve Data.</div>
+  </div>
+  <nav id="timeframes">
+    <button data-tf="1m">1m</button>
+    <button data-tf="5m">5m</button>
+    <button data-tf="15m">15m</button>
+    <button data-tf="1h">1H</button>
+    <button data-tf="1d" class="active">1D</button>
+    <button data-tf="1wk">1W</button>
+    <button data-tf="1mo">1M</button>
+  </nav>
+  <div class="tools">
+    <div class="dropdown">
+      <button id="ind-btn">Indicators ▾</button>
+      <div id="ind-menu" class="menu hidden">
+        <label><input type="checkbox" data-ind="sma20"> SMA 20</label>
+        <label><input type="checkbox" data-ind="sma50"> SMA 50</label>
+        <label><input type="checkbox" data-ind="ema20"> EMA 20</label>
+        <label><input type="checkbox" data-ind="bb"> Bollinger 20,2</label>
+        <label><input type="checkbox" data-ind="vol" checked> Volume</label>
+        <label><input type="checkbox" data-ind="rsi"> RSI 14</label>
+        <label><input type="checkbox" data-ind="macd"> MACD 12,26,9</label>
+        <label><input type="checkbox" data-ind="emaclouds"> EMA Clouds</label>
+        <label><input type="checkbox" data-ind="stoch"> Stochastic 14,3,3</label>
+      </div>
+    </div>
+    <button id="tool-trend" title="Trend line: click two points">╲ Trend</button>
+    <button id="tool-hline" title="Horizontal line: click a price">─ H-Line</button>
+    <button id="tool-clear" title="Delete selected drawing">⌫ Delete</button>
+  </div>
+  <div id="ohlc" class="ohlc"></div>
+</header>
+<div id="main">
+  <aside id="watchlist">
+    <div class="side-tabs">
+      <button data-tab="watchlist" class="active">List</button>
+      <button data-tab="scan">Scan</button>
+      <button data-tab="trades">Trades</button>
+    </div>
+    <div id="tab-watchlist">
+      <div class="wl-head">Watchlist <button id="wl-add" title="Add current symbol">+</button></div>
+      <ul id="wl-list"></ul>
+    </div>
+    <div id="tab-scan" class="hidden">
+      <div id="scan-meta" class="tab-meta"></div>
+      <label class="tab-toggle"><input type="checkbox" id="scan-lines"> Draw put strikes</label>
+      <div id="scan-body"></div>
+    </div>
+    <div id="tab-trades" class="hidden">
+      <div id="trades-meta" class="tab-meta"></div>
+      <ul id="trades-list"></ul>
+    </div>
+  </aside>
+  <div id="chart-wrap">
+    <div id="chart"></div>
+    <div id="draw-hint" class="hidden"></div>
+    <div id="toast" class="hidden"></div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

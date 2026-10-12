@@ -1,0 +1,61 @@
+# Builds the Chart Terminal desktop installers on every version tag.
+#
+# Push a tag like `v0.1.0` and this produces:
+#   macOS:   Chart Terminal _aarch64.dmg / _x64.dmg
+#   Windows: Chart Terminal _x64-setup.exe (NSIS) + _x64_en-US.msi
+#   Linux:   .AppImage + .deb
+# as a draft GitHub release. Publish the draft when ready.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: tauri-apps/tauri-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: chart-terminal/src-tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: "Chart Terminal ${{ github.ref_name }}"
+          releaseDraft: true
+          releaseBody: "See the assets below to download."
+          args: --target ${{ matrix.target }}
