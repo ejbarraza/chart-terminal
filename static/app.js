@@ -101,7 +101,7 @@ if (window.LightweightCharts) {
     rightPriceScale: { borderColor: '#2a2e39' },
     timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
   });
-  candleSeries = chart.addCandlestickSeries({
+  candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
     upColor: '#26a69a', downColor: '#ef5350',
     wickUpColor: '#26a69a', wickDownColor: '#ef5350',
     borderVisible: false,
@@ -210,7 +210,7 @@ function smaOf(vals, n) {
 function addLine(name, data, color, paneId, width = 1) {
   const opts = { color, lineWidth: width, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: true };
   if (paneId) opts.priceScaleId = paneId;
-  const s = chart.addLineSeries(opts);
+  const s = chart.addSeries(LightweightCharts.LineSeries, opts);
   s.setData(data);
   indSeries[name] = s;
   return s;
@@ -266,7 +266,7 @@ function refreshIndicators() {
     }
   }
   if (state.ind.vol) {
-    const s = chart.addHistogramSeries({
+    const s = chart.addSeries(LightweightCharts.HistogramSeries, {
       priceScaleId: 'vol', priceFormat: { type: 'volume' },
       priceLineVisible: false, lastValueVisible: false,
     });
@@ -284,7 +284,7 @@ function refreshIndicators() {
     const m = macdArr(c);
     addLine('macd-pane', m.line, '#4fc3f7', 'macd');
     addLine('macd-sig', m.signal, '#ff9f43', 'macd');
-    const h = chart.addHistogramSeries({ priceScaleId: 'macd', priceLineVisible: false, lastValueVisible: false });
+    const h = chart.addSeries(LightweightCharts.HistogramSeries, { priceScaleId: 'macd', priceLineVisible: false, lastValueVisible: false });
     h.setData(m.hist.map(p => ({ time: p.time, value: p.value, color: p.up ? 'rgba(38,166,154,.6)' : 'rgba(239,83,80,.6)' })));
     indSeries['macd-hist'] = h; paneScales['macd'] = chart.priceScale('macd');
   }
@@ -294,7 +294,7 @@ function refreshIndicators() {
     addLine('stoch-d', st.d, '#ff5252', 'stoch', 1);
     paneScales['stoch'] = chart.priceScale('stoch'); indSeries['stoch-pane'] = k;
     [80, 50, 20].forEach(lv => {
-      const s = chart.addLineSeries({
+      const s = chart.addSeries(LightweightCharts.LineSeries, {
         color: '#787b86', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed,
         priceScaleId: 'stoch', priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       });
@@ -783,7 +783,7 @@ async function loadTrades() {
 }
 
 /* ---------------- boot ---------------- */
-const APP_VER = '0.1.5';
+const APP_VER = '0.1.6';
 // Bridge self-test: the header badge reports whether the app can actually
 // reach its Rust backend, so a screenshot is a complete diagnostic.
 $('app-ver').textContent = 'v' + APP_VER + (TAURI_CORE ? ' …' : ' • web');
