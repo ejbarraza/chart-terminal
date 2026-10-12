@@ -720,6 +720,29 @@ fn main() {
                 .build()
                 .expect("http client"),
         })
+        .setup(|app| {
+            // WebView2 caches the embedded frontend aggressively, so an update
+            // can keep showing the previous version's UI. On a version change,
+            // wipe the browsing data and reload to force fresh assets.
+            let ver = app.package_info().version.to_string();
+            let vf = app
+                .path()
+                .app_config_dir()
+                .map(|d| d.join("app_version"))
+                .unwrap_or_default();
+            let old = std::fs::read_to_string(&vf).unwrap_or_default();
+            if old.trim() != ver {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.clear_all_browsing_data();
+                    let _ = w.eval("window.location.reload();");
+                }
+                if let Some(parent) = vf.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&vf, &ver);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_bars,
             get_quote,
