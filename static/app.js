@@ -248,9 +248,14 @@ function refreshIndicators() {
     const bb = bbArr(c);
     addLine('bb-up', bb.up, '#787b86'); addLine('bb-mid', bb.mid, '#a9b0c0'); addLine('bb-lo', bb.lo, '#787b86');
   }
-  if (state.ind.emaclouds && bars.length > 200) {
+  if (state.ind.emaclouds && bars.length > 20) {
     // Ripster-style: 10 EMAs on hl2, filled clouds between consecutive pairs.
-    const periods = [8, 9, 5, 12, 34, 50, 72, 89, 180, 200];
+    // Periods adapt to available bars so it works on higher timeframes too.
+    const allPeriods = [8, 9, 5, 12, 34, 50, 72, 89, 180, 200];
+    const periods = allPeriods.filter(p => p <= bars.length);
+    // Keep pairs even for the cloud bands.
+    if (periods.length % 2 === 1) periods.pop();
+    if (periods.length < 2) return;
     const pairCols = [
       { up: '#26a69a', down: '#ef5350' },
       { up: '#2962ff', down: '#ff9f43' },
@@ -783,7 +788,7 @@ async function loadTrades() {
 }
 
 /* ---------------- boot ---------------- */
-const APP_VER = '0.1.6';
+const APP_VER = '0.1.7';
 // Bridge self-test: the header badge reports whether the app can actually
 // reach its Rust backend, so a screenshot is a complete diagnostic.
 $('app-ver').textContent = 'v' + APP_VER + (TAURI_CORE ? ' …' : ' • web');
