@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>chart-terminal — free charting</title>
 <link rel="stylesheet" href="styles.css">
+<script>
+/* Inline error trap: runs before any external script. If app.js or the chart
+ * library fails to parse/load, the header badge shows the error. */
+window.addEventListener('error', function(e) {
+  var msg = String((e && e.message) || 'script load failed').slice(0, 80);
+  var b = document.getElementById('app-ver');
+  if (b && b.textContent.indexOf('ERR') < 0) b.textContent += ' [ERR ' + msg + ']';
+}, true);
+</script>
 <script src="vendor/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>

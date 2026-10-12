@@ -3,6 +3,15 @@
  * Data: this app's own /api/* endpoints (yfinance underneath). */
 'use strict';
 
+/* Global error trap: surface any fatal JS error in the header badge so a
+ * screenshot is a complete diagnostic. Must be first. */
+window.__ctError = null;
+window.addEventListener('error', (e) => {
+  window.__ctError = String(e.message || e.error || 'unknown').slice(0, 80);
+  const b = document.getElementById('app-ver');
+  if (b) b.textContent += ' [ERR ' + window.__ctError + ']';
+});
+
 const $ = (id) => document.getElementById(id);
 const LS_STATE = 'ct-state-v1';
 const LS_DRAW = 'ct-drawings-v1';
@@ -83,22 +92,28 @@ let drawMode = null;      // null | 'trend' | 'hline'
 let pendingPoint = null;  // first click of a trend line
 
 /* ---------------- chart ---------------- */
-const chart = LightweightCharts.createChart($('chart'), {
-  layout: { background: { color: '#131722' }, textColor: '#d1d4dc', fontSize: 11 },
-  grid: { vertLines: { color: '#1c2230' }, horzLines: { color: '#1c2230' } },
-  crosshair: { vertLine: { color: '#758696' }, horzLine: { color: '#758696' } },
-  rightPriceScale: { borderColor: '#2a2e39' },
-  timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
-});
-const candleSeries = chart.addCandlestickSeries({
-  upColor: '#26a69a', downColor: '#ef5350',
-  wickUpColor: '#26a69a', wickDownColor: '#ef5350',
-  borderVisible: false,
-});
+let chart = null, candleSeries = null;
+if (window.LightweightCharts) {
+  chart = LightweightCharts.createChart($('chart'), {
+    layout: { background: { color: '#131722' }, textColor: '#d1d4dc', fontSize: 11 },
+    grid: { vertLines: { color: '#1c2230' }, horzLines: { color: '#1c2230' } },
+    crosshair: { vertLine: { color: '#758696' }, horzLine: { color: '#758696' } },
+    rightPriceScale: { borderColor: '#2a2e39' },
+    timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350',
+    wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+    borderVisible: false,
+  });
+} else {
+  $('chart').innerHTML = '<div style="padding:40px;color:#f66">Chart library failed to load.</div>';
+}
 const indSeries = {};   // name -> series
 const paneScales = {};  // paneId -> priceScale
 
 function sizeChart() {
+  if (!chart) return;
   const w = $('chart-wrap');
   chart.applyOptions({ width: w.clientWidth, height: w.clientHeight });
 }
@@ -501,9 +516,9 @@ $('symbol-go').onclick = () => {
 $('symbol-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('symbol-go').click(); });
 
 document.querySelectorAll('#timeframes button').forEach(b => {
-  if (b.dataset.tf === state.tf) { document.querySelector('#timeframes .active')?.classList.remove('active'); b.classList.add('active'); }
+  if (b.dataset.tf === state.tf) { var _a = document.querySelector('#timeframes .active'); if (_a) _a.classList.remove('active'); b.classList.add('active'); }
   b.onclick = () => {
-    document.querySelector('#timeframes .active')?.classList.remove('active');
+    var _b = document.querySelector('#timeframes .active'); if (_b) _b.classList.remove('active');
     b.classList.add('active');
     state.tf = b.dataset.tf; loadSymbol();
   };
@@ -768,7 +783,7 @@ async function loadTrades() {
 }
 
 /* ---------------- boot ---------------- */
-const APP_VER = '0.1.4';
+const APP_VER = '0.1.5';
 // Bridge self-test: the header badge reports whether the app can actually
 // reach its Rust backend, so a screenshot is a complete diagnostic.
 $('app-ver').textContent = 'v' + APP_VER + (TAURI_CORE ? ' …' : ' • web');
