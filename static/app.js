@@ -768,8 +768,16 @@ async function loadTrades() {
 }
 
 /* ---------------- boot ---------------- */
-const APP_VER = '0.1.2';
-$('app-ver').textContent = 'v' + APP_VER;
+const APP_VER = '0.1.3';
+// Bridge self-test: the header badge reports whether the app can actually
+// reach its Rust backend, so a screenshot is a complete diagnostic.
+$('app-ver').textContent = 'v' + APP_VER + (TAURI_CORE ? ' …' : ' • web');
+if (TAURI_CORE) {
+  TAURI_CORE.invoke('get_sources').then(
+    () => { $('app-ver').textContent = 'v' + APP_VER + ' • ok'; },
+    (e) => { $('app-ver').textContent = 'v' + APP_VER + ' • backend err'; console.warn('bridge test failed', e); }
+  );
+}
 $('symbol-input').value = state.symbol;
 sizeChart();
 loadSources().then(() => loadWatchlist().then(() => { markWatchlist(); }));
