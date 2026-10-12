@@ -788,7 +788,7 @@ async function loadTrades() {
 }
 
 /* ---------------- boot ---------------- */
-const APP_VER = '0.1.7';
+const APP_VER = '0.1.8';
 // Bridge self-test: the header badge reports whether the app can actually
 // reach its Rust backend, so a screenshot is a complete diagnostic.
 $('app-ver').textContent = 'v' + APP_VER + (TAURI_CORE ? ' …' : ' • web');

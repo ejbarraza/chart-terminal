@@ -50,6 +50,7 @@ INTERVALS = {
     "5m": ("5m", "1mo"),
     "15m": ("15m", "3mo"),
     "1h": ("1h", "6mo"),
+    "4h": ("1h", "6mo"),  # resampled to 4h below
     "1d": ("1d", "2y"),
     "1wk": ("1wk", "5y"),
     "1mo": ("1mo", "max"),
@@ -57,9 +58,28 @@ INTERVALS = {
 
 # timeframe -> Twelve Data interval
 TD_INTERVALS = {
-    "1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h",
+    "1m": "1min", "5m": "5min", "15m": "15min", "1h": "1h", "4h": "4h",
     "1d": "1day", "1wk": "1week", "1mo": "1month",
 }
+
+def _resample_4h(bars):
+    """Group 1h bars into 4h candles, buckets aligned to UTC midnight."""
+    out, cur, cur_b = [], None, None
+    for b in bars:
+        bucket = b["time"] // (4 * 3600)
+        if cur is not None and bucket == cur_b:
+            cur["high"] = max(cur["high"], b["high"])
+            cur["low"] = min(cur["low"], b["low"])
+            cur["close"] = b["close"]
+            cur["volume"] += b["volume"]
+        else:
+            if cur is not None:
+                out.append(cur)
+            cur_b = bucket
+            cur = dict(b, time=bucket * 4 * 3600)
+    if cur is not None:
+        out.append(cur)
+    return out
 
 app = Flask(__name__)
 
@@ -203,6 +223,8 @@ def bars():
             "close": round(float(row["Close"]), 4),
             "volume": int(row["Volume"]) if row["Volume"] == row["Volume"] else 0,
         })
+    if interval == "4h":
+        out = _resample_4h(out)
     return jsonify({"symbol": symbol, "interval": interval, "bars": out})
 
 

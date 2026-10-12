@@ -68,6 +68,7 @@ fn yahoo_params(interval: &str) -> (&'static str, &'static str) {
         "5m" => ("5m", "1mo"),
         "15m" => ("15m", "3mo"),
         "1h" => ("1h", "6mo"),
+        "4h" => ("1h", "6mo"), // resampled to 4h below
         "1wk" => ("1wk", "5y"),
         "1mo" => ("1mo", "max"),
         _ => ("1d", "2y"),
@@ -80,10 +81,37 @@ fn td_interval(interval: &str) -> &'static str {
         "5m" => "5min",
         "15m" => "15min",
         "1h" => "1h",
+        "4h" => "4h",
         "1wk" => "1week",
         "1mo" => "1month",
         _ => "1day",
     }
+}
+
+/// Resample 1h bars into 4h candles, buckets aligned to UTC midnight.
+fn resample_4h(bars: Vec<Bar>) -> Vec<Bar> {
+    const SPAN: i64 = 4 * 3600;
+    let mut out: Vec<Bar> = Vec::new();
+    let mut cur: Option<Bar> = None;
+    let mut cur_bucket = 0i64;
+    for b in bars {
+        let bucket = b.time.div_euclid(SPAN);
+        match cur.as_mut() {
+            Some(c) if bucket == cur_bucket => {
+                if b.high > c.high { c.high = b.high; }
+                if b.low < c.low { c.low = b.low; }
+                c.close = b.close;
+                c.volume += b.volume;
+            }
+            _ => {
+                if let Some(c) = cur.take() { out.push(c); }
+                cur_bucket = bucket;
+                cur = Some(Bar { time: bucket * SPAN, ..b });
+            }
+        }
+    }
+    if let Some(c) = cur { out.push(c); }
+    out
 }
 
 async fn yahoo_bars(client: &reqwest::Client, symbol: &str, interval: &str) -> Result<Vec<Bar>, String> {
@@ -139,7 +167,11 @@ async fn yahoo_bars(client: &reqwest::Client, symbol: &str, interval: &str) -> R
     if out.is_empty() {
         return Err(format!("no data for {symbol}"));
     }
-    Ok(out)
+    if interval == "4h" {
+        Ok(resample_4h(out))
+    } else {
+        Ok(out)
+    }
 }
 
 async fn yahoo_quote(client: &reqwest::Client, symbol: &str) -> Result<QuoteResponse, String> {
