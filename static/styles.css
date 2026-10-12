@@ -22,6 +22,7 @@ body {
   border-bottom: 1px solid var(--border); flex-wrap: wrap;
 }
 .brand { font-weight: 700; color: #fff; letter-spacing: .3px; margin-right: 4px; }
+.app-ver { font-weight: 400; font-size: 11px; color: var(--muted); letter-spacing: 0; }
 .symbox { display: flex; }
 #symbol-input {
   background: var(--bg); border: 1px solid var(--border); color: var(--text);

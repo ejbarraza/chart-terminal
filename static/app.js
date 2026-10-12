@@ -768,6 +768,8 @@ async function loadTrades() {
 }
 
 /* ---------------- boot ---------------- */
+const APP_VER = '0.1.2';
+$('app-ver').textContent = 'v' + APP_VER;
 $('symbol-input').value = state.symbol;
 sizeChart();
 loadSources().then(() => loadWatchlist().then(() => { markWatchlist(); }));

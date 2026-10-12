@@ -9,7 +9,8 @@
         "title": "Chart Terminal",
         "width": 1440
       }
-    ]
+    ],
+    "withGlobalTauri": true
   },
   "build": {
     "beforeBuildCommand": "",
@@ -36,5 +37,5 @@
   },
   "identifier": "com.ejbarraza.chart-terminal",
   "productName": "Chart Terminal",
-  "version": "0.1.1"
+  "version": "0.1.2"
 }
