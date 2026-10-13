@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -168,6 +169,14 @@ def tdkey_clear():
 @app.get("/")
 def index():
     return send_from_directory(os.path.join(BASE, "static"), "index.html")
+
+
+@app.get("/terminal")
+def terminal():
+    # Bloomberg-style unified terminal (paper-trader + chart-terminal).
+    # Static route wins over the /<path:p> catch-all below.
+    return send_from_directory(os.path.join(BASE, "static", "terminal"),
+                               "index.html")
 
 
 @app.get("/<path:p>")
@@ -391,6 +400,188 @@ def ptrades():
         trades.append({"time": t, "action": action, "qty": qty,
                        "price": price, "strategy": strategy or ""})
     return jsonify({"db": os.path.basename(db), "trades": trades})
+
+
+# ------------------------------------------------------------------ terminal
+# Bloomberg-style unified terminal (served at /terminal): batch quotes plus
+# read-only paper-trader portfolio endpoints. Ledger DBs are opened
+# mode=ro; no POST/PUT/DELETE routes here.
+
+_QUOTE_CACHE_TTL = 60  # seconds
+_quote_cache: dict[str, tuple[float, dict]] = {}
+
+
+@app.get("/api/quotes")
+def quotes_batch():
+    syms = [s.strip().upper() for s in
+            (request.args.get("symbols") or "").split(",") if s.strip()]
+    if not syms:
+        return jsonify({"error": "missing symbols"}), 400
+    now = time.time()
+    out = []
+    for s in syms[:40]:
+        hit = _quote_cache.get(s)
+        if hit and now - hit[0] < _QUOTE_CACHE_TTL:
+            out.append(hit[1])
+            continue
+        try:
+            info = yf.Ticker(s).fast_info
+            price = info.get("lastPrice") or info.get("last_price")
+            prev = info.get("previousClose") or info.get("previous_close")
+        except Exception:
+            price, prev = None, None
+        if price is None:
+            row = {"symbol": s, "error": "NO DATA"}
+        else:
+            chg = (price - prev) / prev * 100 if prev else 0.0
+            row = {"symbol": s, "price": round(float(price), 2),
+                   "changePct": round(float(chg), 2)}
+        _quote_cache[s] = (now, row)
+        out.append(row)
+    return jsonify({"quotes": out})
+
+
+def _pt_db_any():
+    """Ledger DB with the most trades overall (newest mtime breaks ties)."""
+    dbs = glob.glob(os.path.expanduser("~/workspace/paper-trader/**/*.db"),
+                    recursive=True)
+    best, best_n, best_m = None, -1, -1
+    for db in dbs:
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            n = con.execute("select count(*) from trades").fetchone()[0]
+            con.close()
+        except sqlite3.Error:
+            continue
+        m = os.path.getmtime(db)
+        if n > best_n or (n == best_n and m > best_m):
+            best, best_n, best_m = db, n, m
+    return best
+
+
+def _pt_q(db, sql, args=()):
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    try:
+        return [dict(r) for r in con.execute(sql, args).fetchall()]
+    finally:
+        con.close()
+
+
+def _pt_route(api):
+    """Resolve the ledger DB, else 503 NO DATA."""
+    def wrapper(*a, **k):
+        db = _pt_db_any()
+        if not db:
+            return jsonify({"error": "NO DATA — no ledger DB found"}), 503
+        try:
+            return api(db, *a, **k)
+        except sqlite3.Error as e:
+            return jsonify({"error": f"ledger read failed: {e}"}), 502
+    wrapper.__name__ = api.__name__
+    return wrapper
+
+
+@app.get("/api/pt/db")
+def pt_db():
+    db = _pt_db_any()
+    if not db:
+        return jsonify({"db": None}), 503
+    return jsonify({"db": os.path.basename(db)})
+
+
+@app.get("/api/pt/equity")
+@_pt_route
+def pt_equity(db):
+    rows = _pt_q(db, "SELECT ts, equity, cash FROM equity ORDER BY ts")
+    return jsonify({"db": os.path.basename(db), "curve": rows})
+
+
+@app.get("/api/pt/summary")
+@_pt_route
+def pt_summary(db):
+    curve = _pt_q(db, "SELECT ts, equity, cash FROM equity ORDER BY ts")
+    if not curve:
+        return jsonify({"equity": 0.0, "cash": 0.0, "return_pct": 0.0,
+                        "max_drawdown_pct": 0.0, "n_points": 0})
+    eq = [c["equity"] for c in curve]
+    peak, max_dd = eq[0], 0.0
+    for v in eq:
+        peak = max(peak, v)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - v) / peak)
+    return jsonify({"equity": eq[-1], "cash": curve[-1]["cash"],
+                    "return_pct": (eq[-1] / eq[0] - 1) * 100 if eq[0] else 0.0,
+                    "max_drawdown_pct": max_dd * 100,
+                    "n_points": len(eq)})
+
+
+@app.get("/api/pt/positions")
+@_pt_route
+def pt_positions(db):
+    snap = _pt_q(db, "SELECT ts FROM snapshots ORDER BY ts DESC LIMIT 1")
+    if snap:
+        latest_ts = snap[0]["ts"]
+    else:
+        legacy = _pt_q(db, "SELECT MAX(ts) AS ts FROM positions")
+        latest_ts = legacy[0]["ts"] if legacy else None
+    if not latest_ts:
+        return jsonify({"positions": []})
+    rows = _pt_q(db, "SELECT pkey, qty, mark FROM positions WHERE ts=?",
+                 (latest_ts,))
+    return jsonify({"as_of": latest_ts, "positions": rows})
+
+
+@app.get("/api/pt/strategies")
+@_pt_route
+def pt_strategies(db):
+    rows = _pt_q(db, """
+        SELECT strategy,
+               SUM(CASE WHEN cash_delta > 0 THEN cash_delta ELSE 0 END) AS gross_in,
+               SUM(CASE WHEN cash_delta < 0 THEN cash_delta ELSE 0 END) AS gross_out,
+               SUM(cash_delta) AS net,
+               COUNT(*) AS n_trades
+        FROM trades GROUP BY strategy ORDER BY net DESC""")
+    return jsonify({"strategies": rows})
+
+
+@app.get("/api/pt/trades")
+@_pt_route
+def pt_trades(db):
+    try:
+        limit = min(int(request.args.get("limit", 50)), 500)
+    except ValueError:
+        limit = 50
+    rows = _pt_q(db, "SELECT ts, strategy, symbol, action, qty, price,"
+                     " cash_delta FROM trades ORDER BY id DESC LIMIT ?",
+                 (limit,))
+    return jsonify({"trades": rows})
+
+
+@app.get("/api/pt/risk")
+@_pt_route
+def pt_risk(db):
+    rows = _pt_q(db, "SELECT ts, strategy, symbol, action, reason"
+                     " FROM risk_events ORDER BY id DESC LIMIT 200")
+    return jsonify({"risk_events": rows})
+
+
+@app.get("/api/pt/rejections")
+@_pt_route
+def pt_rejections(db):
+    rows = _pt_q(db, "SELECT reason, strategy, COUNT(*) AS n FROM risk_events "
+                     "GROUP BY reason, strategy ORDER BY n DESC")
+    by_reason: dict[str, int] = {}
+    for r in rows:
+        by_reason[r["reason"]] = by_reason.get(r["reason"], 0) + r["n"]
+    kill_reasons = {"drawdown_killswitch", "daily_loss_killswitch"}
+    tripped = sorted(kill_reasons & set(by_reason))
+    return jsonify({"total": sum(by_reason.values()),
+                    "by_reason": by_reason,
+                    "by_strategy_reason": rows,
+                    "killswitch_tripped": tripped,
+                    "killswitch_status": "TRIPPED: " + ", ".join(tripped)
+                                         if tripped else "ARMED — NO TRIPS"})
 
 
 if __name__ == "__main__":

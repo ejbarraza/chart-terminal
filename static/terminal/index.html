@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>E. BARRAZA TERMINAL</title>
+<link rel="stylesheet" href="/static/terminal/terminal.css">
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+
+<div id="hdr">
+    <span class="title">E.&nbsp;BARRAZA&nbsp;TERMINAL</span>
+    <span id="paper-pill">PAPER ONLY &mdash; NO LIVE ORDERS</span>
+    <span class="spacer"></span>
+    <span id="datastat">DATA: ...</span>
+    <span class="clock" id="clock">--:--:--</span>
+</div>
+
+<div id="cmdline">
+    <span class="prompt">&gt;</span>
+    <input id="cmdinput" autocomplete="off" spellcheck="false" placeholder="">
+    <span id="cursor"></span>
+    <span id="cmdhint">TYPE TICKER + ENTER &nbsp; e.g. AAPL &lt;GO&gt;</span>
+</div>
+
+<div id="fkeys">
+    <div class="fkey active" data-v="market"><b>F1</b> MARKET</div>
+    <div class="fkey" data-v="chart"><b>F2</b> CHART</div>
+    <div class="fkey" data-v="portfolio"><b>F3</b> PORTFOLIO</div>
+    <div class="fkey" data-v="scanner"><b>F4</b> SCANNER</div>
+    <div class="fkey" data-v="risk"><b>F5</b> RISK</div>
+</div>
+
+<div id="views">
+
+    <!-- F1 MARKET -->
+    <div class="view active" id="v-market">
+        <div class="panel"><h2>MARKET MONITOR &mdash; WATCHLIST</h2>
+            <div class="body" id="mkt-body"><div class="nodata">LOADING...</div></div>
+        </div>
+    </div>
+
+    <!-- F2 CHART -->
+    <div class="view" id="v-chart">
+        <div class="panel"><h2>SECURITY CHART</h2>
+            <div id="quote-hdr"><span class="amb" id="q-sym">---</span>
+                <span class="wht" id="q-price"></span>
+                <span id="q-chg"></span></div>
+            <div class="tfbar" id="tfbar">
+                <button data-tf="1m">1m</button><button data-tf="5m">5m</button>
+                <button data-tf="15m">15m</button><button data-tf="1h">1H</button>
+                <button data-tf="4h" class="active">4H</button>
+                <button data-tf="1d">1D</button><button data-tf="1wk">1W</button>
+            </div>
+            <div id="chart-wrap"><div id="chart"></div></div>
+        </div>
+    </div>
+
+    <!-- F3 PORTFOLIO -->
+    <div class="view" id="v-portfolio">
+        <div class="panel"><h2>PORTFOLIO SUMMARY <span class="gry" id="pt-db"></span></h2>
+            <div class="stat-row" id="pt-stats"></div>
+        </div>
+        <div class="grid2">
+            <div class="panel"><h2>EQUITY CURVE</h2>
+                <div id="equity-wrap"><div id="equity-chart"></div></div>
+            </div>
+            <div class="panel"><h2>OPEN POSITIONS <span class="gry" id="pos-asof"></span></h2>
+                <div class="body" id="pos-body"></div>
+            </div>
+        </div>
+        <div class="grid2">
+            <div class="panel"><h2>STRATEGY P&amp;L</h2>
+                <div class="body" id="strat-body"></div>
+            </div>
+            <div class="panel"><h2>RECENT TRADES</h2>
+                <div class="body" id="trades-body"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- F4 SCANNER -->
+    <div class="view" id="v-scanner">
+        <div class="panel"><h2>OPTIONS SCANNER &mdash;
+            <select id="scan-sym"></select>
+            <span class="gry" id="scan-at"></span></h2>
+            <div class="body" id="csp-body"></div>
+        </div>
+        <div class="panel"><h2>LEAPS CALLS &mdash; TOP 5 BY REQUIRED RALLY</h2>
+            <div class="body" id="leaps-body"></div>
+        </div>
+    </div>
+
+    <!-- F5 RISK -->
+    <div class="view" id="v-risk">
+        <div class="panel"><h2>KILL-SWITCH STATUS</h2>
+            <div class="body" id="kill-body"></div>
+        </div>
+        <div class="grid2">
+            <div class="panel"><h2>ARBITER REJECTIONS BY REASON</h2>
+                <div class="body" id="rej-body"></div>
+            </div>
+            <div class="panel"><h2>RISK EVENTS (LATEST 200)</h2>
+                <div class="body" id="risk-body"></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<div id="footer">
+    <span><span class="amb">F1-F5</span> VIEWS</span>
+    <span><span class="amb">R</span> REFRESH</span>
+    <span><span class="amb">ESC</span> CLEAR CMD</span>
+    <span><span class="amb">ENTER</span> LOAD TICKER</span>
+    <span style="margin-left:auto">READ-ONLY TERMINAL &mdash; NO ORDER ENTRY</span>
+</div>
+
+<script src="/static/terminal/terminal.js"></script>
+</body>
+</html>
