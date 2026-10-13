@@ -550,6 +550,11 @@ function hideHint() { $('draw-hint').classList.add('hidden'); }
 $('tool-trend').onclick = () => setDrawMode('trend', 'tool-trend');
 $('tool-hline').onclick = () => setDrawMode('hline', 'tool-hline');
 $('tool-clear').onclick = removeSelected;
+/* Terminal view: relative page navigation. Desktop (Tauri) loads the bundled
+ * static/terminal/index.html; browser mode hits the Flask /terminal/ route. */
+$('terminal-btn').onclick = () => {
+  location.href = TAURI_CORE ? 'terminal/index.html' : '/terminal/';
+};
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && drawMode) setDrawMode(drawMode, drawMode === 'trend' ? 'tool-trend' : 'tool-hline');
   if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement.tagName !== 'INPUT') removeSelected();

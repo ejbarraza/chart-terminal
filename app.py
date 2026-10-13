@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory
 
 import requests
 import yfinance as yf
@@ -174,9 +174,21 @@ def index():
 @app.get("/terminal")
 def terminal():
     # Bloomberg-style unified terminal (paper-trader + chart-terminal).
-    # Static route wins over the /<path:p> catch-all below.
+    # Trailing-slash form keeps the page's relative asset paths working.
+    return redirect("/terminal/", 301)
+
+
+@app.get("/terminal/")
+def terminal_index():
     return send_from_directory(os.path.join(BASE, "static", "terminal"),
                                "index.html")
+
+
+@app.get("/terminal/<path:p>")
+def terminal_asset(p):
+    # terminal.css / terminal.js via relative paths. Explicit routes win
+    # over the /<path:p> catch-all below.
+    return send_from_directory(os.path.join(BASE, "static", "terminal"), p)
 
 
 @app.get("/<path:p>")

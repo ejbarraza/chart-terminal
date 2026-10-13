@@ -11,10 +11,44 @@ function fmt(n, d = 2) {
 }
 function chgCls(v) { return v > 0 ? "up" : v < 0 ? "dn" : "gry"; }
 function nodata(msg) { return `<div class="nodata">${msg || "NO DATA"}</div>`; }
+
+/* ---------- transport ----------
+ * Browser mode (Flask): plain HTTP fetch to the Flask backend.
+ * Desktop mode (Tauri): invoke() -> Rust commands; no HTTP server exists.
+ * Both speak the same JSON shapes, so the rest of the page is identical.
+ * (Mirrors the adapter in ../app.js.) */
+const TAURI_INVOKE =
+  (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) ||
+  (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke &&
+    window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__)) ||
+  null;
 async function get(url) {
-    const r = await fetch(url);
-    const j = await r.json().catch(() => ({}));
-    return { ok: r.ok, status: r.status, j };
+    if (!TAURI_INVOKE) {
+        const r = await fetch(url);
+        const j = await r.json().catch(() => ({}));
+        return { ok: r.ok, status: r.status, j };
+    }
+    const u = new URL(url, "http://localhost");
+    const q = Object.fromEntries(u.searchParams.entries());
+    try {
+        switch (u.pathname) {
+            case "/api/watchlist": return { ok: true, j: await TAURI_INVOKE("get_watchlist") };
+            case "/api/quotes": return { ok: true, j: await TAURI_INVOKE("get_quotes", { symbols: q.symbols || "" }) };
+            case "/api/bars": return { ok: true, j: await TAURI_INVOKE("get_bars", { symbol: q.symbol, interval: q.interval }) };
+            case "/api/scan": return { ok: true, j: await TAURI_INVOKE("get_scan", { symbol: q.symbol }) };
+            case "/api/pt/db": return { ok: true, j: await TAURI_INVOKE("get_pt_db") };
+            case "/api/pt/summary": return { ok: true, j: await TAURI_INVOKE("get_pt_summary") };
+            case "/api/pt/equity": return { ok: true, j: await TAURI_INVOKE("get_pt_equity") };
+            case "/api/pt/positions": return { ok: true, j: await TAURI_INVOKE("get_pt_positions") };
+            case "/api/pt/strategies": return { ok: true, j: await TAURI_INVOKE("get_pt_strategies") };
+            case "/api/pt/trades": return { ok: true, j: await TAURI_INVOKE("get_pt_recent", { limit: parseInt(q.limit || "50", 10) }) };
+            case "/api/pt/risk": return { ok: true, j: await TAURI_INVOKE("get_pt_risk") };
+            case "/api/pt/rejections": return { ok: true, j: await TAURI_INVOKE("get_pt_rejections") };
+        }
+    } catch (e) {
+        return { ok: false, j: { error: (e && e.message) || String(e) } };
+    }
+    return { ok: false, j: { error: "unknown endpoint " + u.pathname } };
 }
 
 /* ---------- clock ---------- */
@@ -36,8 +70,14 @@ function show(view) {
     if (view === "chart") setTimeout(sizeCharts, 30);
     if (view === "portfolio") setTimeout(sizeCharts, 30);
 }
-document.querySelectorAll(".fkey").forEach((el) =>
+document.querySelectorAll(".fkey[data-v]").forEach((el) =>
     el.addEventListener("click", () => show(el.dataset.v)));
+
+/* back to the main charting UI (not a data view, so excluded from the
+ * fkey binding above) */
+$("fkey-back").addEventListener("click", () => {
+    location.href = TAURI_INVOKE ? "../index.html" : "/";
+});
 
 document.addEventListener("keydown", (e) => {
     if (e.key >= "F1" && e.key <= "F5") {

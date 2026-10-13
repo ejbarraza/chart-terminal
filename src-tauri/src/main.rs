@@ -661,6 +661,561 @@ fn get_pt_trades(symbol: String) -> Result<PtTradesResponse, String> {
     Ok(PtTradesResponse { db: db_name, trades })
 }
 
+/* ---------------- terminal view (Flask /terminal parity) ----------------
+ * The Bloomberg-style terminal page ships as static/terminal/index.html and
+ * calls these commands when running inside the desktop app (no Flask server).
+ * JSON shapes mirror the Flask /api/quotes and /api/pt/... endpoints exactly,
+ * so terminal.js needs no per-mode branching. */
+
+/* ---- batch quotes (F1 market monitor) ---- */
+
+#[derive(Serialize)]
+struct QuoteRow {
+    symbol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    price: Option<f64>,
+    #[serde(rename = "changePct", skip_serializing_if = "Option::is_none")]
+    change_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct QuotesResponse {
+    quotes: Vec<QuoteRow>,
+}
+
+#[tauri::command]
+async fn get_quotes(
+    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+    symbols: String,
+    source: Option<String>,
+) -> Result<QuotesResponse, String> {
+    let syms: Vec<String> = symbols
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .take(40)
+        .collect();
+    if syms.is_empty() {
+        return Err("missing symbols".into());
+    }
+    let source = source.unwrap_or_else(|| "yahoo".to_string());
+    let mut out = Vec::with_capacity(syms.len());
+    for s in syms {
+        let row = match source.as_str() {
+            "twelvedata" => match td_key(&app) {
+                Some(key) => match td_quote(&state.client, &s, &key).await {
+                    Ok(q) => QuoteRow {
+                        symbol: s.clone(),
+                        price: Some(q.price),
+                        change_pct: Some(q.change_pct),
+                        error: None,
+                    },
+                    Err(_) => QuoteRow {
+                        symbol: s.clone(),
+                        price: None,
+                        change_pct: None,
+                        error: Some("NO DATA".into()),
+                    },
+                },
+                None => QuoteRow {
+                    symbol: s.clone(),
+                    price: None,
+                    change_pct: None,
+                    error: Some("Twelve Data key not set".into()),
+                },
+            },
+            _ => match yahoo_quote(&state.client, &s).await {
+                Ok(q) => QuoteRow {
+                    symbol: s.clone(),
+                    price: Some(q.price),
+                    change_pct: Some(q.change_pct),
+                    error: None,
+                },
+                Err(_) => QuoteRow {
+                    symbol: s.clone(),
+                    price: None,
+                    change_pct: None,
+                    error: Some("NO DATA".into()),
+                },
+            },
+        };
+        out.push(row);
+    }
+    Ok(QuotesResponse { quotes: out })
+}
+
+/* ---- paper-trader read-only ledger (F3 portfolio, F5 risk) ---- */
+
+/// Ledger DB with the most trades overall (newest mtime breaks ties),
+/// mirroring Flask's _pt_db_any(). CHART_PT_DB overrides for testing.
+fn pt_db_any() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("CHART_PT_DB") {
+        let p = PathBuf::from(p);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let base = dirs_home().join("workspace/paper-trader");
+    let mut best: Option<(PathBuf, i64, i64)> = None; // path, n_trades, mtime
+    let mut stack = vec![base];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).ok()?;
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("db") {
+                let (n, m) = (|| {
+                    let con = rusqlite::Connection::open_with_flags(
+                        &p,
+                        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+                    )
+                    .ok()?;
+                    let n: i64 = con
+                        .query_row("select count(*) from trades", [], |r| r.get(0))
+                        .unwrap_or(0);
+                    let m = std::fs::metadata(&p)
+                        .and_then(|x| x.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    Some((n, m))
+                })()
+                .unwrap_or((0, 0));
+                let replace = match &best {
+                    None => true,
+                    Some((_, bn, bm)) => n > *bn || (n == *bn && m > *bm),
+                };
+                if replace {
+                    best = Some((p, n, m));
+                }
+            }
+        }
+    }
+    best.map(|(p, _, _)| p)
+}
+
+fn pt_db_name(path: &PathBuf) -> Option<String> {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
+}
+
+fn pt_con(path: &PathBuf) -> Result<rusqlite::Connection, String> {
+    rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| format!("ledger read failed: {e}"))
+}
+
+#[derive(Serialize)]
+struct PtDbResponse {
+    db: Option<String>,
+}
+
+#[tauri::command]
+fn get_pt_db() -> Result<PtDbResponse, String> {
+    Ok(PtDbResponse {
+        db: pt_db_any().as_ref().and_then(pt_db_name),
+    })
+}
+
+#[derive(Serialize)]
+struct EquityPoint {
+    ts: String,
+    equity: f64,
+    cash: f64,
+}
+
+#[derive(Serialize)]
+struct PtEquityResponse {
+    db: Option<String>,
+    curve: Vec<EquityPoint>,
+}
+
+#[tauri::command]
+fn get_pt_equity() -> Result<PtEquityResponse, String> {
+    let path = pt_db_any();
+    let mut curve = Vec::new();
+    if let Some(p) = &path {
+        let con = pt_con(p)?;
+        let mut stmt = con
+            .prepare("select ts, equity, cash from equity order by ts")
+            .map_err(|e| format!("ledger read failed: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, f64>(1)?,
+                    r.get::<_, f64>(2)?,
+                ))
+            })
+            .map_err(|e| format!("ledger read failed: {e}"))?;
+        for row in rows.flatten() {
+            curve.push(EquityPoint {
+                ts: row.0,
+                equity: row.1,
+                cash: row.2,
+            });
+        }
+    }
+    Ok(PtEquityResponse {
+        db: path.as_ref().and_then(pt_db_name),
+        curve,
+    })
+}
+
+#[derive(Serialize)]
+struct PtSummaryResponse {
+    equity: f64,
+    cash: f64,
+    #[serde(rename = "return_pct")]
+    return_pct: f64,
+    #[serde(rename = "max_drawdown_pct")]
+    max_drawdown_pct: f64,
+    #[serde(rename = "n_points")]
+    n_points: i64,
+}
+
+/// Pure max-drawdown math, shared with get_pt_summary and unit-tested below.
+fn summary_stats(eq: &[f64]) -> (f64, f64, f64) {
+    if eq.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let mut peak: f64 = eq[0];
+    let mut max_dd: f64 = 0.0;
+    for &v in eq {
+        if v > peak {
+            peak = v;
+        }
+        if peak > 0.0 {
+            max_dd = max_dd.max((peak - v) / peak);
+        }
+    }
+    let ret = if eq[0] != 0.0 { eq[eq.len() - 1] / eq[0] - 1.0 } else { 0.0 };
+    (eq[eq.len() - 1], ret * 100.0, max_dd * 100.0)
+}
+
+#[tauri::command]
+fn get_pt_summary() -> Result<PtSummaryResponse, String> {
+    let path = pt_db_any().ok_or("NO DATA — no ledger DB found")?;
+    let con = pt_con(&path)?;
+    let mut stmt = con
+        .prepare("select ts, equity, cash from equity order by ts")
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let rows: Vec<(String, f64, f64)> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, f64>(1)?,
+                r.get::<_, f64>(2)?,
+            ))
+        })
+        .map_err(|e| format!("ledger read failed: {e}"))?
+        .flatten()
+        .collect();
+    if rows.is_empty() {
+        return Ok(PtSummaryResponse {
+            equity: 0.0,
+            cash: 0.0,
+            return_pct: 0.0,
+            max_drawdown_pct: 0.0,
+            n_points: 0,
+        });
+    }
+    let eq: Vec<f64> = rows.iter().map(|r| r.1).collect();
+    let (equity, return_pct, max_drawdown_pct) = summary_stats(&eq);
+    Ok(PtSummaryResponse {
+        equity,
+        cash: rows.last().map(|r| r.2).unwrap_or(0.0),
+        return_pct,
+        max_drawdown_pct,
+        n_points: rows.len() as i64,
+    })
+}
+
+#[derive(Serialize)]
+struct PtPosition {
+    pkey: String,
+    qty: f64,
+    mark: f64,
+}
+
+#[derive(Serialize)]
+struct PtPositionsResponse {
+    #[serde(rename = "as_of")]
+    as_of: Option<String>,
+    positions: Vec<PtPosition>,
+}
+
+#[tauri::command]
+fn get_pt_positions() -> Result<PtPositionsResponse, String> {
+    let path = pt_db_any().ok_or("NO DATA — no ledger DB found")?;
+    let con = pt_con(&path)?;
+    let snap: Option<String> = con
+        .query_row("select ts from snapshots order by ts desc limit 1", [], |r| {
+            r.get(0)
+        })
+        .ok();
+    let latest_ts = match snap {
+        Some(t) => Some(t),
+        None => con
+            .query_row("select max(ts) as ts from positions", [], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .unwrap_or(None),
+    };
+    let mut positions = Vec::new();
+    if let Some(ts) = &latest_ts {
+        let mut stmt = con
+            .prepare("select pkey, qty, mark from positions where ts = ?1")
+            .map_err(|e| format!("ledger read failed: {e}"))?;
+        let rows = stmt
+            .query_map([ts], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, f64>(1)?,
+                    r.get::<_, f64>(2)?,
+                ))
+            })
+            .map_err(|e| format!("ledger read failed: {e}"))?;
+        for row in rows.flatten() {
+            positions.push(PtPosition {
+                pkey: row.0,
+                qty: row.1,
+                mark: row.2,
+            });
+        }
+    }
+    Ok(PtPositionsResponse {
+        as_of: latest_ts,
+        positions,
+    })
+}
+
+#[derive(Serialize)]
+struct PtStrategyRow {
+    strategy: String,
+    net: f64,
+    #[serde(rename = "n_trades")]
+    n_trades: i64,
+}
+
+#[derive(Serialize)]
+struct PtStrategiesResponse {
+    strategies: Vec<PtStrategyRow>,
+}
+
+#[tauri::command]
+fn get_pt_strategies() -> Result<PtStrategiesResponse, String> {
+    let path = pt_db_any().ok_or("NO DATA — no ledger DB found")?;
+    let con = pt_con(&path)?;
+    let mut stmt = con
+        .prepare(
+            "select strategy,
+                    sum(case when cash_delta > 0 then cash_delta else 0 end) as gross_in,
+                    sum(case when cash_delta < 0 then cash_delta else 0 end) as gross_out,
+                    sum(cash_delta) as net,
+                    count(*) as n_trades
+             from trades group by strategy order by net desc",
+        )
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
+                r.get::<_, i64>(4)?,
+            ))
+        })
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let mut strategies = Vec::new();
+    for row in rows.flatten() {
+        strategies.push(PtStrategyRow {
+            strategy: row.0,
+            net: row.1,
+            n_trades: row.2,
+        });
+    }
+    Ok(PtStrategiesResponse { strategies })
+}
+
+#[derive(Serialize)]
+struct PtTradeRow {
+    ts: String,
+    strategy: String,
+    symbol: String,
+    action: String,
+    qty: f64,
+    price: f64,
+}
+
+#[derive(Serialize)]
+struct PtRecentTradesResponse {
+    trades: Vec<PtTradeRow>,
+}
+
+#[tauri::command]
+fn get_pt_recent(limit: Option<i64>) -> Result<PtRecentTradesResponse, String> {
+    let limit = limit.unwrap_or(50).clamp(1, 500);
+    let path = pt_db_any().ok_or("NO DATA — no ledger DB found")?;
+    let con = pt_con(&path)?;
+    let mut stmt = con
+        .prepare(
+            "select ts, strategy, symbol, action, qty, price, cash_delta \
+             from trades order by id desc limit ?1",
+        )
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let rows = stmt
+        .query_map([limit], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, f64>(4)?,
+                r.get::<_, f64>(5)?,
+            ))
+        })
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let mut trades = Vec::new();
+    for row in rows.flatten() {
+        trades.push(PtTradeRow {
+            ts: row.0,
+            strategy: row.1,
+            symbol: row.2,
+            action: row.3,
+            qty: row.4,
+            price: row.5,
+        });
+    }
+    Ok(PtRecentTradesResponse { trades })
+}
+
+#[derive(Serialize)]
+struct PtRiskEvent {
+    ts: String,
+    strategy: String,
+    symbol: String,
+    action: String,
+    reason: String,
+}
+
+#[derive(Serialize)]
+struct PtRiskResponse {
+    #[serde(rename = "risk_events")]
+    risk_events: Vec<PtRiskEvent>,
+}
+
+#[tauri::command]
+fn get_pt_risk() -> Result<PtRiskResponse, String> {
+    let path = pt_db_any().ok_or("NO DATA — no ledger DB found")?;
+    let con = pt_con(&path)?;
+    let mut stmt = con
+        .prepare(
+            "select ts, strategy, symbol, action, reason \
+             from risk_events order by id desc limit 200",
+        )
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let mut risk_events = Vec::new();
+    for row in rows.flatten() {
+        risk_events.push(PtRiskEvent {
+            ts: row.0,
+            strategy: row.1,
+            symbol: row.2,
+            action: row.3,
+            reason: row.4,
+        });
+    }
+    Ok(PtRiskResponse { risk_events })
+}
+
+#[derive(Serialize)]
+struct PtRejectionsResponse {
+    total: i64,
+    #[serde(rename = "by_reason")]
+    by_reason: std::collections::HashMap<String, i64>,
+    #[serde(rename = "killswitch_tripped")]
+    killswitch_tripped: Vec<String>,
+    #[serde(rename = "killswitch_status")]
+    killswitch_status: String,
+}
+
+#[tauri::command]
+fn get_pt_rejections() -> Result<PtRejectionsResponse, String> {
+    let path = pt_db_any().ok_or("NO DATA — no ledger DB found")?;
+    let con = pt_con(&path)?;
+    let mut stmt = con
+        .prepare(
+            "select reason, strategy, count(*) as n from risk_events \
+             group by reason, strategy order by n desc",
+        )
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|e| format!("ledger read failed: {e}"))?;
+    let mut by_reason: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
+    for (reason, _strategy, n) in rows.flatten() {
+        *by_reason.entry(reason).or_insert(0) += n;
+    }
+    let mut tripped: Vec<String> = ["drawdown_killswitch", "daily_loss_killswitch"]
+        .iter()
+        .filter(|r| by_reason.contains_key(**r))
+        .map(|r| r.to_string())
+        .collect();
+    tripped.sort();
+    let status = if tripped.is_empty() {
+        "ARMED — NO TRIPS".to_string()
+    } else {
+        format!("TRIPPED: {}", tripped.join(", "))
+    };
+    let total: i64 = by_reason.values().sum();
+    Ok(PtRejectionsResponse {
+        total,
+        by_reason,
+        killswitch_tripped: tripped,
+        killswitch_status: status,
+    })
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+
+    #[test]
+    fn summary_stats_flat_book() {
+        let (eq, ret, dd) = summary_stats(&[100000.0, 101000.0, 99500.0, 102000.0]);
+        assert!((eq - 102000.0).abs() < 1e-9);
+        assert!((ret - 2.0).abs() < 1e-9);
+        assert!((dd - (1500.0 / 101000.0) * 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn summary_stats_empty() {
+        assert_eq!(summary_stats(&[]), (0.0, 0.0, 0.0));
+    }
+}
+
 fn watchlist_path(app: &AppHandle) -> Result<PathBuf, String> {    let dir = app
         .path()
         .app_config_dir()
@@ -778,12 +1333,21 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_bars,
             get_quote,
+            get_quotes,
             get_watchlist,
             save_watchlist,
             get_sources,
             set_td_key,
             get_scan,
-            get_pt_trades
+            get_pt_trades,
+            get_pt_db,
+            get_pt_equity,
+            get_pt_summary,
+            get_pt_positions,
+            get_pt_strategies,
+            get_pt_recent,
+            get_pt_risk,
+            get_pt_rejections
         ])
         .run(tauri::generate_context!())
         .expect("error while running chart-terminal");
